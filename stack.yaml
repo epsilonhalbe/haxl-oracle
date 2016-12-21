@@ -1,0 +1,53 @@
+user-message: ! ' If you use this first-time - run `stack docker pull` in order
+                  to get the docker image - and then `stack exec -- blog`
+                '
+resolver: lts-7.13
+packages:
+- '.'
+extra-deps:
+- persistent-odbc-0.2.0.1
+- HDBC-odbc-2.4.0.1
+- esqueleto-2.4.3
+flags: {}
+extra-package-dbs: []
+system-ghc: true
+
+docker:
+  enable: false
+  #repo: "haskell:8.0.1-oracle"
+  image: "70d2566c2964"
+
+  # If true, the container will be run "detached" (in the background).  Refer
+  # to the Docker users guide for information about how to manage containers.
+  # This option would rarely make sense in the configuration file, but can be
+  # useful on the command-line.  When true, implies `persist`.
+  detach: false
+
+  # If true, the container will not be deleted after it terminates.  Refer to
+  # the Docker users guide for information about how to manage containers. This
+  # option would rarely make sense in the configuration file, but can be
+  # useful on the command-line.  `detach` implies `persist`.
+  persist: false
+
+  # What to name the Docker container.  Only useful with `detach` or
+  # `persist` true.  (default none)
+  container-name: "haskell-eXchange-2015"
+
+  # Location of a Docker container-compatible 'stack' executable with the
+  # matching version. This executable must be built on linux-x86_64 and
+  # statically linked.
+  # Valid values are:
+  #   host: use the host's executable.  This is the default when the host's
+  #     executable is known to work (e.g., from official linux-x86_64 bindist)
+  #   download: download a compatible executable matching the host's version.
+  #     This is the default when the host's executable is not known to work
+  #   image: use the 'stack' executable baked into the image.  The version
+  #     must match the host's version
+  #   /path/to/stack: path on the host's local filesystem
+  stack-exe: host
+
+  # If true (the default when using the local Docker Engine), run processes
+  # in the Docker container as the same UID/GID as the host.  The ensures
+  # that files written by the container are owned by you on the host.
+  # When the Docker Engine is remote (accessed by tcp), defaults to false.
+  set-user: true
