@@ -26,7 +26,7 @@ module BlogDataSource where
 
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger   (LoggingT, runStderrLoggingT)
 import           Control.Monad.Reader   (ReaderT, forM)
 import           Data.Hashable
@@ -36,8 +36,8 @@ import           Data.Maybe
 import           Data.Text              (Text)
 import           Data.Time.Clock        (UTCTime)
 import           Data.Typeable
-import           Database.Persist       (selectKeysList, selectList, (==.))
-import           Database.Persist.ODBC  (ConnectionString, Entity, Key,
+import           Database.Persist       (selectKeysList, selectList, (==.), (<-.))
+import           Database.Persist.ODBC  (ConnectionString, Entity(..), Key,
                                          SqlBackend, oracle, runSqlPool,
                                          createODBCPool, ConnectionPool)
 import           Database.Persist.TH    (mkDeleteCascade, mkMigrate, mkPersist,
@@ -81,7 +81,7 @@ type Blog a = ReaderT SqlBackend (LoggingT IO) a
 
 data BlogRequest a where
   FetchPosts       :: BlogRequest [Key Post]
-  FetchPostContent :: PostId -> BlogRequest (Entity PostContent)
+  FetchPostContent :: PostId -> BlogRequest PostContent
 
 deriving instance Show (BlogRequest a)
 deriving instance Typeable BlogRequest
@@ -98,7 +98,7 @@ instance Hashable (BlogRequest a) where
 getPostIds :: GenHaxl u [Key Post]
 getPostIds = dataFetch FetchPosts
 
-getPostContent :: PostId -> GenHaxl u (Entity PostContent)
+getPostContent :: PostId -> GenHaxl u PostContent
 getPostContent = dataFetch . FetchPostContent
 
 initDataSource :: IO (State BlogRequest)
@@ -117,7 +117,7 @@ instance DataSource u BlogRequest where
 
 type Batches
   = ( [ResultVar [Key Post]]                       -- FetchPosts
-    , [(Key Post, ResultVar (Entity PostContent))] -- FetchPostContent
+    , [(Key Post, ResultVar PostContent)]          -- FetchPostContent
     )
 
 emptyBatches :: Batches
@@ -128,33 +128,44 @@ collect (BlockedFetch FetchPosts v) (as,bs) = (v:as,bs)
 collect (BlockedFetch (FetchPostContent x) v) (as,bs) = (as,(x,v):bs)
 
 batchFetch :: ConnectionPool -> [BlockedFetch BlogRequest] -> IO ()
-batchFetch = undefined
-
+batchFetch db = doFetch db . foldr collect emptyBatches
 
 doFetch :: ConnectionPool -> Batches -> IO ()
-doFetch db (as,bs) = undefined
+doFetch db (as,bs) = do
+  sqlMultiFetch db as id
+    (selectKeysList [] [] :: Blog [Key Post])
+    id
+    (\_ ids -> Just ids)
+
+  sqlMultiFetch db bs snd
+    (selectList [PostContentPid <-. map fst bs] [] :: Blog [Entity PostContent])
+    (foldl' (\m x -> Map.insert (postContentPid $ entityVal x) (entityVal x) m) Map.empty)
+    (\(x,_) y -> Map.lookup x y)
 
 sqlMultiFetch
   :: ConnectionPool           -- db
   -> [x]                      -- requests
   -> (x -> ResultVar a)       -- getvar
-  -> String                   -- query
+  -> Blog [y]                 -- query
   -> ([y] -> z)               -- collate
   -> (x -> z -> Maybe a)      -- extract
   -> IO ()
 
-sqlMultiFetch db [] =
-  do x <- runSqlPool (selectKeysList [] [] :: Blog [Key Post]) db
-     return x
+sqlMultiFetch db [] _ _ _ _ = return ()
+sqlMultiFetch db requests getvar query collate extract =
+  do result <- runStderrLoggingT $ runSqlPool query db
+     let fetched = collate result
+     forM_ requests $ \q ->
+       case extract q fetched of
+          Nothing -> putFailure (getvar q) (BlogDBException "missing result")
+          Just r -> putSuccess (getvar q) r
 
+data BlogDBException = BlogDBException String
+  deriving (Show, Typeable)
 
-
-
-
-
-
-
-
+instance Exception BlogDBException where
+  toException = transientErrorToException
+  fromException = transientErrorFromException
 
 
 
