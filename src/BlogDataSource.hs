@@ -1,43 +1,87 @@
-{-# LANGUAGE
-    StandaloneDeriving, GADTs, TypeFamilies,
-    FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving,
-    OverloadedStrings, DeriveDataTypeable
- #-}
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
+{-# LANGUAGE DeriveDataTypeable         #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE EmptyDataDecls             #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE QuasiQuotes                #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
 
-module BlogDataSource
-  ( PostId, PostContent
-  , getPostIds
-  , getPostContent
-  , initDataSource
-  , BlogRequest(..)
-  , BlogDBException(..)
-  ) where
+
+module BlogDataSource where
+  {-( PostId, PostContent-}
+  {-, getPostIds-}
+  {-, getPostContent-}
+  {-, initDataSource-}
+  {-, BlogRequest(..)-}
+  {-, BlogDBException(..)-}
+  {-) where-}
 
 
-import Data.Hashable
-import Data.Typeable
-import qualified Data.Map as Map
-import Control.Monad
-import Data.Maybe
-import Data.List
-import Haxl.Core
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.Logger   (LoggingT, runStderrLoggingT)
+import           Control.Monad.Reader   (ReaderT, forM)
+import           Data.Hashable
+import           Data.List
+import qualified Data.Map               as Map
+import           Data.Maybe
+import           Data.Text              (Text)
+import           Data.Time.Clock        (UTCTime)
+import           Data.Typeable
+import           Database.Persist       (selectKeysList, selectList, (==.))
+import           Database.Persist.ODBC  (ConnectionString, Entity, Key,
+                                         SqlBackend, oracle, runSqlPool,
+                                         createODBCPool, ConnectionPool)
+import           Database.Persist.TH    (mkDeleteCascade, mkMigrate, mkPersist,
+                                         mpsGeneric, persistUpperCase, share,
+                                         sqlSettings)
+import           Haxl.Core
 import Database.SQLite
-import Control.Exception
 
 
 -- -----------------------------------------------------------------------------
 -- Types
 
-type PostId = Int
-type PostContent = String
+share [ mkPersist sqlSettings {mpsGeneric = False}
+      , mkMigrate "migrateAll"
+      , mkDeleteCascade sqlSettings {mpsGeneric = False}]
+      [persistUpperCase|
 
+Post            sql=POSTINFO
+  Id    Int     sql=POSTID
+  date  UTCTime sql=POSTDATE
+  topic Text    sql=POSTTOPIC
 
--- -----------------------------------------------------------------------------
--- Request type
+  deriving Show Eq
+
+PostContent      sql=POSTCONTENT
+  pid     PostId sql=POSTID
+  content Text   sql=CONTENT
+
+  deriving Show Eq
+  Primary pid
+
+PostViews      sql=POSTVIEWS
+  pvid  PostId sql=POSTID
+  views Int    sql=VIEWS
+
+  deriving Show Eq
+  Primary pvid
+|]
+
+type Blog a = ReaderT SqlBackend (LoggingT IO) a
 
 data BlogRequest a where
-  FetchPosts       :: BlogRequest [PostId]
-  FetchPostContent :: PostId -> BlogRequest PostContent
+  FetchPosts       :: BlogRequest [Key Post]
+  FetchPostContent :: PostId -> BlogRequest (Entity PostContent)
 
 deriving instance Show (BlogRequest a)
 deriving instance Typeable BlogRequest
@@ -48,48 +92,32 @@ deriving instance Eq (BlogRequest a)
 
 instance Hashable (BlogRequest a) where
   hashWithSalt salt FetchPosts = hashWithSalt salt (0::Int)
-  hashWithSalt salt (FetchPostContent p) = hashWithSalt salt (1::Int, p)
+  hashWithSalt salt (FetchPostContent p) = hashWithSalt salt (1::Int, unPostKey p)
 
 
--- -----------------------------------------------------------------------------
--- Requests
-
-getPostIds :: GenHaxl u [PostId]
+getPostIds :: GenHaxl u [Key Post]
 getPostIds = dataFetch FetchPosts
 
-getPostContent :: PostId -> GenHaxl u PostContent
+getPostContent :: PostId -> GenHaxl u (Entity PostContent)
 getPostContent = dataFetch . FetchPostContent
 
--- more operations ...
-
-
--- -----------------------------------------------------------------------------
--- Data source implementation
+initDataSource :: IO (State BlogRequest)
+initDataSource = BlogDataState <$> runStderrLoggingT (createODBCPool (Just oracle) conn 10)
+  where conn = "DSN=ORACLE11"
 
 instance StateKey BlogRequest where
-  data State BlogRequest = BlogDataState SQLiteHandle
-
-initDataSource :: IO (State BlogRequest)
-initDataSource = BlogDataState <$> openConnection "blog/blog.sqlite"
+  data State BlogRequest = BlogDataState ConnectionPool
 
 instance DataSourceName BlogRequest where
-  dataSourceName _ = "BlogDataSource"
+  dataSourceName _ = "[Oracle 11g] BlogDataSource"
 
 instance DataSource u BlogRequest where
   fetch (BlogDataState db) _flags _userEnv blockedFetches =
     SyncFetch $ batchFetch db blockedFetches
 
-
-
--- -----------------------------------------------------------------------------
--- Group requests by type
-
-batchFetch :: SQLiteHandle -> [BlockedFetch BlogRequest] -> IO ()
-batchFetch db = doFetch db . foldr collect emptyBatches
-
 type Batches
-  = ( [ResultVar [PostId]]              -- FetchPosts
-    , [(PostId, ResultVar PostContent)] -- FetchPostContent
+  = ( [ResultVar [Key Post]]                       -- FetchPosts
+    , [(Key Post, ResultVar (Entity PostContent))] -- FetchPostContent
     )
 
 emptyBatches :: Batches
@@ -99,65 +127,35 @@ collect :: BlockedFetch BlogRequest -> Batches -> Batches
 collect (BlockedFetch FetchPosts v) (as,bs) = (v:as,bs)
 collect (BlockedFetch (FetchPostContent x) v) (as,bs) = (as,(x,v):bs)
 
+batchFetch :: ConnectionPool -> [BlockedFetch BlogRequest] -> IO ()
+batchFetch = undefined
 
--- -----------------------------------------------------------------------------
--- Fetch data for each batch
 
-doFetch :: SQLiteHandle -> Batches -> IO ()
-doFetch db (as,bs) = do
-  sqlMultiFetch db as id
-    "select postid from postinfo;"
-    (\row -> do [(_,Int id)] <- Just row; return (fromIntegral id))
-    id
-    (\_ ids -> Just ids)
-
-  sqlMultiFetch db bs snd
-    ("select postid,content from postcontent where postid in " ++
-       idList (map fst bs))
-    (\row -> do
-       [(_,Int id),(_,Text content)] <- Just row
-       return (fromIntegral id, content))
-    Map.fromList
-    (\(x,_) -> Map.lookup x)
-
+doFetch :: ConnectionPool -> Batches -> IO ()
+doFetch db (as,bs) = undefined
 
 sqlMultiFetch
-  :: SQLiteHandle
-  -> [x]
-  -> (x -> ResultVar a)
-  -> String
-  -> (Row Value -> Maybe y)
-  -> ([y] -> z)
-  -> (x -> z -> Maybe a)
+  :: ConnectionPool           -- db
+  -> [x]                      -- requests
+  -> (x -> ResultVar a)       -- getvar
+  -> String                   -- query
+  -> ([y] -> z)               -- collate
+  -> (x -> z -> Maybe a)      -- extract
   -> IO ()
 
-sqlMultiFetch _  [] _ _ _ _ _ = return ()
-sqlMultiFetch db requests getvar query parserow collate extract = do
-  results <- sql db query
-  case results of
-    Left s -> failAll (BlogDBException s)
-    Right [rows] -> do
-      let fetched = collate (catMaybes (map parserow rows))
-      forM_ requests $ \q ->
-        case extract q fetched of
-          Nothing -> putFailure (getvar q) (BlogDBException "missing result")
-          Just r -> putSuccess (getvar q) r
-    _other -> failAll (BlogDBException "invalid result")
- where
-  failAll e = forM_ requests $ \q -> putFailure (getvar q) e
+sqlMultiFetch db [] =
+  do x <- runSqlPool (selectKeysList [] [] :: Blog [Key Post]) db
+     return x
 
-idList :: [PostId] -> String
-idList ids = "(" ++ intercalate "," (map show ids) ++ ")"
 
-sql :: SQLiteHandle -> String -> IO (Either String [[Row Value]])
-sql db query = do
-  putStrLn query
-  execStatement db query
 
-data BlogDBException = BlogDBException String
-  deriving (Show, Typeable)
 
-instance Exception BlogDBException where
-  toException = transientErrorToException
-  fromException = transientErrorFromException
+
+
+
+
+
+
+
+
 

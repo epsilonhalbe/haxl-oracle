@@ -1,19 +1,14 @@
-{-# LANGUAGE
-    StandaloneDeriving, GADTs, TypeFamilies,
-    FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving,
-    OverloadedStrings, DeriveDataTypeable
- #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module HaxlBlog (
-    PostId, PostContent,
-    getPostIds, getPostContent,
-    Haxl,
-    run
-  ) where
+module HaxlBlog (getPostIds, getPostContent, Haxl, run) where
 
 
-import BlogDataSource
-import Haxl.Core
+import           BlogDataSource
+import           Haxl.Core
 
 type Haxl a = GenHaxl () a
 

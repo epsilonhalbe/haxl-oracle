@@ -8,6 +8,9 @@ extra-deps:
 - persistent-odbc-0.2.0.1
 - HDBC-odbc-2.4.0.1
 - esqueleto-2.4.3
+- haxl-0.4.0.2
+- sqlite-0.5.5
+
 flags: {}
 extra-package-dbs: []
 system-ghc: true
