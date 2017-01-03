@@ -1,14 +1,14 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TypeFamilies          #-}
 
 module HaxlBlog (getPostIds, getPostContent, Haxl, run) where
 
 
-import           BlogDataSource
-import           Haxl.Core
+import BlogDataSource
+import Haxl.Core      (GenHaxl, initEnv, runHaxl, stateEmpty, stateSet)
 
 type Haxl a = GenHaxl () a
 

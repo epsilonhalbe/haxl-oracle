@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE EmptyDataDecls             #-}
@@ -13,38 +12,35 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 
-
-module BlogDataSource where
-  {-( PostId, PostContent-}
-  {-, getPostIds-}
-  {-, getPostContent-}
-  {-, initDataSource-}
-  {-, BlogRequest(..)-}
-  {-, BlogDBException(..)-}
-  {-) where-}
+module BlogDataSource
+  ( PostId
+  , PostContent
+  , getPostIds
+  , getPostContent
+  , initDataSource
+  , BlogRequest(..)
+  , BlogDBException(..)
+  ) where
 
 
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.IO.Class (MonadIO, liftIO)
-import           Control.Monad.Logger   (LoggingT, runStderrLoggingT)
-import           Control.Monad.Reader   (ReaderT, forM)
+import           Control.Monad.Logger  (LoggingT, runStderrLoggingT)
+import           Control.Monad.Reader  (ReaderT)
 import           Data.Hashable
 import           Data.List
-import qualified Data.Map               as Map
-import           Data.Maybe
-import           Data.Text              (Text)
-import           Data.Time.Clock        (UTCTime)
+import qualified Data.Map              as Map
+import           Data.Text             (Text)
+import           Data.Time.Clock       (UTCTime)
 import           Data.Typeable
-import           Database.Persist       (selectKeysList, selectList, (==.), (<-.))
-import           Database.Persist.ODBC  (ConnectionString, Entity(..), Key,
-                                         SqlBackend, oracle, runSqlPool,
-                                         createODBCPool, ConnectionPool)
-import           Database.Persist.TH    (mkDeleteCascade, mkMigrate, mkPersist,
-                                         mpsGeneric, persistUpperCase, share,
-                                         sqlSettings)
+import           Database.Persist      (selectKeysList, selectList, (<-.))
+import           Database.Persist.ODBC (ConnectionPool, Entity (..), Key,
+                                        SqlBackend, createODBCPool, oracle,
+                                        runSqlPool)
+import           Database.Persist.TH   (mkDeleteCascade, mkMigrate, mkPersist,
+                                        mpsGeneric, persistUpperCase, share,
+                                        sqlSettings)
 import           Haxl.Core
-import Database.SQLite
 
 
 -- -----------------------------------------------------------------------------
@@ -124,7 +120,7 @@ emptyBatches :: Batches
 emptyBatches = ([],[])
 
 collect :: BlockedFetch BlogRequest -> Batches -> Batches
-collect (BlockedFetch FetchPosts v) (as,bs) = (v:as,bs)
+collect (BlockedFetch FetchPosts v) (as,bs)           = (v:as,bs)
 collect (BlockedFetch (FetchPostContent x) v) (as,bs) = (as,(x,v):bs)
 
 batchFetch :: ConnectionPool -> [BlockedFetch BlogRequest] -> IO ()
@@ -151,14 +147,14 @@ sqlMultiFetch
   -> (x -> z -> Maybe a)      -- extract
   -> IO ()
 
-sqlMultiFetch db [] _ _ _ _ = return ()
+sqlMultiFetch _ [] _ _ _ _ = return ()
 sqlMultiFetch db requests getvar query collate extract =
   do result <- runStderrLoggingT $ runSqlPool query db
      let fetched = collate result
      forM_ requests $ \q ->
        case extract q fetched of
           Nothing -> putFailure (getvar q) (BlogDBException "missing result")
-          Just r -> putSuccess (getvar q) r
+          Just r  -> putSuccess (getvar q) r
 
 data BlogDBException = BlogDBException String
   deriving (Show, Typeable)

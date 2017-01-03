@@ -1,6 +1,6 @@
 {-# LANGUAGE
     DeriveGeneric, EmptyDataDecls, FlexibleContexts, FlexibleInstances, GADTs,
-    GeneralizedNewtypeDeriving, MultiParamTypeClasses, OverloadedStrings,
+    GeneralizedNewtypeDeriving, MultiParamTypeClasses, OverloadedStrings, CPP,
     QuasiQuotes, TemplateHaskell, TypeFamilies
  #-}
 
@@ -13,12 +13,14 @@ import           Data.Text              (Text)
 import           Data.Time.Clock        (UTCTime)
 import           Database.Persist       (selectKeysList, selectList, (==.))
 import           Database.Persist.ODBC  (ConnectionString, Entity, Key,
-                                         SqlBackend, oracle, runSqlPool, runMigration,
-                                         printMigration, withODBCPool)
+                                         SqlBackend, oracle, printMigration,
+                                         runSqlPool, withODBCPool)
 import           Database.Persist.TH    (mkDeleteCascade, mkMigrate, mkPersist,
                                          mpsGeneric, persistUpperCase, share,
-                                         sqlSettings
-                                        )
+                                         sqlSettings)
+#ifdef MIGRATE
+import           Database.Persist.ODBC   (runMigration)
+#endif
 
 share [ mkPersist sqlSettings {mpsGeneric = False}
       , mkMigrate "migrateAll"
@@ -58,7 +60,11 @@ getPostContent pid = selectList [PostContentPid ==. pid] []
 
 main :: IO ()
 main = runBlog $ do
+#ifdef MIGRATE
+  runMigration migrateAll
+#else
   printMigration migrateAll
+#endif
   xs <- getPostIds
   ys <- forM xs getPostContent
   liftIO $ print ys

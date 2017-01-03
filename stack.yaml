@@ -9,16 +9,14 @@ extra-deps:
 - HDBC-odbc-2.4.0.1
 - esqueleto-2.4.3
 - haxl-0.4.0.2
-- sqlite-0.5.5
 
 flags: {}
 extra-package-dbs: []
 system-ghc: true
 
 docker:
-  enable: false
-  #repo: "haskell:8.0.1-oracle"
-  image: "70d2566c2964"
+  enable: true
+  repo: "haskell:8.0.1-oracle"
 
   # If true, the container will be run "detached" (in the background).  Refer
   # to the Docker users guide for information about how to manage containers.
